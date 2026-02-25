@@ -8,8 +8,8 @@ import os
 # Config fichiers
 # -----------------------------
 DB_NAME = "database.db"
-CSV_FILE = "Recettes alchimiques.csv"
-PDF_FILE = "recettes_alchimiques.pdf"
+CSV_FILE = "Recettes_alchimiques.csv"  # nom exact du CSV
+PDF_FILE = "recettes_alchimiques.pdf"  # nom exact du PDF
 
 # -----------------------------
 # Connexion DB
@@ -67,17 +67,25 @@ def load_pdf_text():
     return ""
 
 # -----------------------------
-# Import CSV si table vide
+# Import CSV sécurisé
 # -----------------------------
 def import_csv():
     count = cursor.execute("SELECT COUNT(*) FROM recettes").fetchone()[0]
-    if count == 0:
-        df = load_csv()
-        df.to_sql("recettes", conn, if_exists="append", index=False)
-        conn.commit()
+    if count > 0:
+        return  # déjà importé
+
+    df = load_csv()
+    
+    # Ne garder que les colonnes existantes dans la table
+    cursor.execute("PRAGMA table_info(recettes)")
+    cols = [col[1] for col in cursor.fetchall()]
+    df = df[[c for c in df.columns if c in cols]]
+    
+    df.to_sql("recettes", conn, if_exists="append", index=False)
+    conn.commit()
 
 # -----------------------------
-# Extraction PDF
+# Extraction PDF sécurisée
 # -----------------------------
 def extract_descriptions(force=False):
     cursor.execute("PRAGMA table_info(recettes)")
@@ -86,7 +94,6 @@ def extract_descriptions(force=False):
         cursor.execute("ALTER TABLE recettes ADD COLUMN description TEXT")
         conn.commit()
 
-    # Ne pas ré-extraire si déjà fait
     if not force:
         count = cursor.execute("SELECT COUNT(*) FROM recettes WHERE description IS NOT NULL AND description != ''").fetchone()[0]
         if count > 0:
@@ -113,6 +120,7 @@ def extract_descriptions(force=False):
             descriptions[nom] = desc
         else:
             descriptions[nom] = ""
+    
     for nom, desc in descriptions.items():
         cursor.execute("UPDATE recettes SET description=? WHERE `Nom recette`=?", (desc, nom))
     conn.commit()
@@ -135,7 +143,7 @@ def get_recettes_joueur(joueur_id):
     """, (joueur_id,)).fetchall()
 
 # -----------------------------
-# Import initial CSV + PDF
+# Initialisation CSV + PDF
 # -----------------------------
 import_csv()
 extract_descriptions()
