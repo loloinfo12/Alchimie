@@ -9,7 +9,7 @@ import os
 # -----------------------------
 DB_NAME = "database.db"
 CSV_FILE = "Recettes alchimiques.csv"
-PDF_FILE = "recettes alchimiques.pdf"
+PDF_FILE = "recettes_alchimiques.pdf"
 
 # -----------------------------
 # Connexion DB
