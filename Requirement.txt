@@ -1,0 +1,4 @@
+streamlit
+pandas
+chardet
+streamlit-autorefresh
