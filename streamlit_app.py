@@ -8,8 +8,8 @@ import os
 # Config fichiers
 # -----------------------------
 DB_NAME = "database.db"
-CSV_FILE = "Recettes_alchimiques.csv"  # nom exact du CSV
-PDF_FILE = "recettes_alchimiques.pdf"  # nom exact du PDF
+CSV_FILE = "recettes_alchimiques.csv"   # nom exact du CSV
+PDF_FILE = "recettes_alchimiques.pdf"   # nom exact du PDF
 
 # -----------------------------
 # Connexion DB
@@ -62,7 +62,9 @@ def load_pdf_text():
         text = ""
         with pdfplumber.open(PDF_FILE) as pdf:
             for page in pdf.pages:
-                text += page.extract_text() + "\n"
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
         return text
     return ""
 
@@ -85,7 +87,7 @@ def import_csv():
     conn.commit()
 
 # -----------------------------
-# Extraction PDF sécurisée
+# Extraction PDF sécurisée (ligne par ligne)
 # -----------------------------
 def extract_descriptions(force=False):
     cursor.execute("PRAGMA table_info(recettes)")
@@ -95,35 +97,51 @@ def extract_descriptions(force=False):
         conn.commit()
 
     if not force:
-        count = cursor.execute("SELECT COUNT(*) FROM recettes WHERE description IS NOT NULL AND description != ''").fetchone()[0]
+        count = cursor.execute(
+            "SELECT COUNT(*) FROM recettes WHERE description IS NOT NULL AND description != ''"
+        ).fetchone()[0]
         if count > 0:
             return
 
-    df_recettes = pd.read_sql("SELECT `Nom recette` FROM recettes", conn)
-    pdf_text = load_pdf_text()
-    if not pdf_text:
+    if not os.path.exists(PDF_FILE):
         st.warning(f"PDF {PDF_FILE} non trouvé, les descriptions ne seront pas extraites.")
         return
 
+    df_recettes = pd.read_sql("SELECT `Nom recette` FROM recettes", conn)
+    noms_recettes = list(df_recettes["Nom recette"])
+
+    # Extraire texte ligne par ligne
+    lines = []
+    with pdfplumber.open(PDF_FILE) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                lines += page_text.split("\n")
+
+    # Affichage diagnostic (optionnel)
+    st.text_area("Extrait PDF (diagnostic)", "\n".join(lines[:50]), height=200)
+
+    # Capture des descriptions
     descriptions = {}
-    for nom in df_recettes["Nom recette"]:
-        start_idx = pdf_text.find(nom)
-        if start_idx != -1:
-            rest_text = pdf_text[start_idx + len(nom):]
-            next_idx = len(rest_text)
-            for other_nom in df_recettes["Nom recette"]:
-                if other_nom != nom:
-                    idx = rest_text.find(other_nom)
-                    if idx != -1 and idx < next_idx:
-                        next_idx = idx
-            desc = rest_text[:next_idx].strip().replace("\n", " ")
-            descriptions[nom] = desc
-        else:
-            descriptions[nom] = ""
-    
+    for nom in noms_recettes:
+        desc = ""
+        capture = False
+        for line in lines:
+            if nom.strip().lower() in line.strip().lower():
+                capture = True
+                continue
+            if capture:
+                if any(other_nom.strip().lower() in line.strip().lower() for other_nom in noms_recettes if other_nom != nom):
+                    break
+                desc += line.strip() + " "
+        descriptions[nom] = desc.strip()
+
     for nom, desc in descriptions.items():
-        cursor.execute("UPDATE recettes SET description=? WHERE `Nom recette`=?", (desc, nom))
+        cursor.execute(
+            "UPDATE recettes SET description=? WHERE `Nom recette`=?", (desc, nom)
+        )
     conn.commit()
+    st.success("Descriptions extraites depuis le PDF !")
 
 # -----------------------------
 # Fonctions utilitaires
@@ -143,7 +161,7 @@ def get_recettes_joueur(joueur_id):
     """, (joueur_id,)).fetchall()
 
 # -----------------------------
-# Initialisation CSV + PDF
+# Import initial CSV + PDF
 # -----------------------------
 import_csv()
 extract_descriptions()
