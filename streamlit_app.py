@@ -10,7 +10,7 @@ import unicodedata
 # Config fichiers
 # -----------------------------
 DB_NAME = "database.db"
-CSV_FILE = "recettes alchimiques.csv"   # ton CSV corrigé
+CSV_FILE = "Recettes alchimiques.csv"   # ton CSV corrigé
 PDF_FILE = "recettes_alchimiques.pdf"   # PDF contenant descriptions
 
 # -----------------------------
