@@ -3,13 +3,15 @@ import sqlite3
 import pandas as pd
 import pdfplumber
 import os
+import chardet
+import unicodedata
 
 # -----------------------------
 # Config fichiers
 # -----------------------------
 DB_NAME = "database.db"
-CSV_FILE = "Recettes alchimiques.csv"   # nom exact du CSV
-PDF_FILE = "recettes_alchimiques.pdf"   # nom exact du PDF
+CSV_FILE = "recettes alchimiques.csv"   # ton CSV corrigé
+PDF_FILE = "recettes_alchimiques.pdf"   # PDF contenant descriptions
 
 # -----------------------------
 # Connexion DB
@@ -50,41 +52,53 @@ def init_db():
 init_db()
 
 # -----------------------------
-# Caching CSV et PDF
+# Fonction pour normaliser texte
 # -----------------------------
-@st.cache_data
-def load_csv():
-    return pd.read_csv(CSV_FILE, sep=";", encoding="latin1")
-
-@st.cache_data
-def load_pdf_text():
-    if os.path.exists(PDF_FILE):
-        text = ""
-        with pdfplumber.open(PDF_FILE) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-        return text
-    return ""
+def normalize_text(s):
+    if not isinstance(s, str):
+        s = str(s)
+    return unicodedata.normalize("NFC", s)
 
 # -----------------------------
-# Import CSV sécurisé
+# Chargement CSV sécurisé
+# -----------------------------
+@st.cache_data
+def load_csv(csv_file):
+    # Détection automatique de l'encodage
+    with open(csv_file, 'rb') as f:
+        raw = f.read()
+        result = chardet.detect(raw)
+        encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+    # Lire CSV avec encodage détecté
+    df = pd.read_csv(csv_file, sep=";", encoding=encoding)
+
+    # Normaliser toutes les colonnes texte
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].apply(lambda x: normalize_text(x))
+
+    return df
+
+# -----------------------------
+# Import CSV vers SQLite
 # -----------------------------
 def import_csv():
     count = cursor.execute("SELECT COUNT(*) FROM recettes").fetchone()[0]
     if count > 0:
         return  # déjà importé
 
-    df = load_csv()
-    
+    df = load_csv(CSV_FILE)
+
     # Ne garder que les colonnes existantes dans la table
     cursor.execute("PRAGMA table_info(recettes)")
     cols = [col[1] for col in cursor.fetchall()]
     df = df[[c for c in df.columns if c in cols]]
-    
+
+    # Insérer dans la base SQLite
     df.to_sql("recettes", conn, if_exists="append", index=False)
     conn.commit()
+    st.success("CSV importé et normalisé !")
 
 # -----------------------------
 # Extraction PDF sécurisée (ligne par ligne)
@@ -118,7 +132,7 @@ def extract_descriptions(force=False):
             if page_text:
                 lines += page_text.split("\n")
 
-    # Affichage diagnostic (optionnel)
+    # Affichage diagnostic
     st.text_area("Extrait PDF (diagnostic)", "\n".join(lines[:50]), height=200)
 
     # Capture des descriptions
@@ -127,11 +141,11 @@ def extract_descriptions(force=False):
         desc = ""
         capture = False
         for line in lines:
-            if nom.strip().lower() in line.strip().lower():
+            if normalize_text(nom).lower() in normalize_text(line).lower():
                 capture = True
                 continue
             if capture:
-                if any(other_nom.strip().lower() in line.strip().lower() for other_nom in noms_recettes if other_nom != nom):
+                if any(normalize_text(other_nom).lower() in normalize_text(line).lower() for other_nom in noms_recettes if other_nom != nom):
                     break
                 desc += line.strip() + " "
         descriptions[nom] = desc.strip()
