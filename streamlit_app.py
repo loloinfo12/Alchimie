@@ -9,7 +9,7 @@ import os
 # -----------------------------
 DB_NAME = "database.db"
 CSV_FILE = "Recettes alchimiques.csv"
-PDF_FILE = "recettes alchimiques.pdf"
+PDF_FILE = "Recettes.pdf"
 
 # -----------------------------
 # Connexion DB
@@ -21,7 +21,6 @@ cursor = conn.cursor()
 # Initialisation DB
 # -----------------------------
 def init_db():
-    # Table joueurs
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS joueurs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,18 +28,15 @@ def init_db():
         niveau INTEGER
     )
     """)
-    
-    # Table recettes
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS recettes (
         rowid INTEGER PRIMARY KEY AUTOINCREMENT,
         `Nom recette` TEXT,
         Type TEXT,
-        But TEXT
+        But TEXT,
+        description TEXT
     )
     """)
-    
-    # Table relation
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS joueur_recettes (
         joueur_id INTEGER,
@@ -49,50 +45,59 @@ def init_db():
         FOREIGN KEY(recette_id) REFERENCES recettes(rowid)
     )
     """)
-    
     conn.commit()
 
+init_db()
+
 # -----------------------------
-# Vérifier colonne description
+# Caching CSV et PDF
 # -----------------------------
-def ensure_description_column():
+@st.cache_data
+def load_csv():
+    return pd.read_csv(CSV_FILE, sep=";", encoding="latin1")
+
+@st.cache_data
+def load_pdf_text():
+    if os.path.exists(PDF_FILE):
+        text = ""
+        with pdfplumber.open(PDF_FILE) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() + "\n"
+        return text
+    return ""
+
+# -----------------------------
+# Import CSV si table vide
+# -----------------------------
+def import_csv():
+    count = cursor.execute("SELECT COUNT(*) FROM recettes").fetchone()[0]
+    if count == 0:
+        df = load_csv()
+        df.to_sql("recettes", conn, if_exists="append", index=False)
+        conn.commit()
+
+# -----------------------------
+# Extraction PDF
+# -----------------------------
+def extract_descriptions(force=False):
     cursor.execute("PRAGMA table_info(recettes)")
     cols = [col[1] for col in cursor.fetchall()]
     if "description" not in cols:
         cursor.execute("ALTER TABLE recettes ADD COLUMN description TEXT")
         conn.commit()
 
-# -----------------------------
-# Import CSV si table vide
-# -----------------------------
-def import_csv():
-    tables = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='recettes';").fetchone()
-    if tables:
-        existing = cursor.execute("SELECT COUNT(*) FROM recettes").fetchone()[0]
-        if existing > 0:
-            return  # déjà importé
-    
-    df = pd.read_csv(CSV_FILE, sep=";", encoding="latin1")
-    df.to_sql("recettes", conn, if_exists="append", index=False)
-    conn.commit()
+    # Ne pas ré-extraire si déjà fait
+    if not force:
+        count = cursor.execute("SELECT COUNT(*) FROM recettes WHERE description IS NOT NULL AND description != ''").fetchone()[0]
+        if count > 0:
+            return
 
-# -----------------------------
-# Extraire descriptions PDF
-# -----------------------------
-def extract_descriptions():
-    ensure_description_column()  # Vérifie/crée la colonne
-    
     df_recettes = pd.read_sql("SELECT `Nom recette` FROM recettes", conn)
-    
-    if not os.path.exists(PDF_FILE):
+    pdf_text = load_pdf_text()
+    if not pdf_text:
         st.warning(f"PDF {PDF_FILE} non trouvé, les descriptions ne seront pas extraites.")
         return
-    
-    pdf_text = ""
-    with pdfplumber.open(PDF_FILE) as pdf:
-        for page in pdf.pages:
-            pdf_text += page.extract_text() + "\n"
-    
+
     descriptions = {}
     for nom in df_recettes["Nom recette"]:
         start_idx = pdf_text.find(nom)
@@ -108,17 +113,9 @@ def extract_descriptions():
             descriptions[nom] = desc
         else:
             descriptions[nom] = ""
-    
     for nom, desc in descriptions.items():
         cursor.execute("UPDATE recettes SET description=? WHERE `Nom recette`=?", (desc, nom))
     conn.commit()
-
-# -----------------------------
-# Initialisation
-# -----------------------------
-init_db()
-import_csv()
-extract_descriptions()
 
 # -----------------------------
 # Fonctions utilitaires
@@ -138,23 +135,26 @@ def get_recettes_joueur(joueur_id):
     """, (joueur_id,)).fetchall()
 
 # -----------------------------
+# Import initial CSV + PDF
+# -----------------------------
+import_csv()
+extract_descriptions()
+
+# -----------------------------
 # Interface Streamlit
 # -----------------------------
 st.sidebar.title("🔐 Connexion")
 role = st.sidebar.radio("Je suis :", ["Administrateur", "Joueur"])
 
 # -----------------------------
-# Interface Administrateur
+# Admin
 # -----------------------------
 if role == "Administrateur":
     st.title("🛠 Interface Administrateur")
-    menu = st.sidebar.selectbox("Menu Admin", ["Gérer Joueurs", "Attribuer Recettes"])
-    
+    menu = st.sidebar.selectbox("Menu Admin", ["Gérer Joueurs", "Attribuer Recettes", "Mettre à jour Recettes"])
+
     if menu == "Gérer Joueurs":
         st.header("👤 Gestion des joueurs")
-        
-        # Ajouter
-        st.subheader("Ajouter un joueur")
         nom = st.text_input("Nom du joueur")
         niveau = st.number_input("Niveau", 1, 20)
         if st.button("Ajouter"):
@@ -164,9 +164,7 @@ if role == "Administrateur":
                 st.success("Joueur ajouté !")
             else:
                 st.error("Nom du joueur vide !")
-        
-        # Supprimer
-        st.subheader("Supprimer un joueur")
+
         joueurs = get_joueurs()
         if joueurs:
             joueur = st.selectbox("Choisir joueur à supprimer", joueurs, format_func=lambda x: x[1])
@@ -177,38 +175,39 @@ if role == "Administrateur":
                 st.success("Joueur supprimé !")
         else:
             st.info("Aucun joueur à supprimer.")
-    
+
     elif menu == "Attribuer Recettes":
         st.header("📜 Attribution des recettes")
         joueurs = get_joueurs()
         recettes = get_recettes()
-        
         if joueurs and recettes:
             joueur = st.selectbox("Choisir joueur", joueurs, format_func=lambda x: x[1])
             recette = st.selectbox("Choisir recette", recettes, format_func=lambda x: x[1])
-            
             if st.button("Attribuer"):
-                cursor.execute("""
-                    INSERT OR IGNORE INTO joueur_recettes (joueur_id, recette_id) VALUES (?, ?)
-                """, (joueur[0], recette[0]))
+                cursor.execute("INSERT OR IGNORE INTO joueur_recettes (joueur_id, recette_id) VALUES (?, ?)", (joueur[0], recette[0]))
                 conn.commit()
                 st.success(f"Recette '{recette[1]}' attribuée à {joueur[1]} !")
         else:
             st.warning("Il faut au moins un joueur et une recette.")
 
+    elif menu == "Mettre à jour Recettes":
+        st.header("🔄 Mise à jour des recettes depuis CSV et PDF")
+        if st.button("Mettre à jour maintenant"):
+            import_csv()
+            extract_descriptions(force=True)
+            st.success("Recettes et descriptions mises à jour !")
+
 # -----------------------------
-# Interface Joueur
+# Joueur
 # -----------------------------
 elif role == "Joueur":
     st.title("🧪 Mes Recettes")
-    
     joueurs = get_joueurs()
     if not joueurs:
         st.info("Aucun joueur enregistré. Contactez l'administrateur.")
     else:
         joueur_nom = st.selectbox("Sélectionnez votre nom", [j[1] for j in joueurs])
-        joueur_id = [j[0] for j in joueurs if j[1]==joueur_nom][0]
-        
+        joueur_id = [j[0] for j in joueurs if j[1] == joueur_nom][0]
         recettes = get_recettes_joueur(joueur_id)
         if recettes:
             for r in recettes:
