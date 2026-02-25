@@ -36,8 +36,7 @@ def init_db():
         rowid INTEGER PRIMARY KEY AUTOINCREMENT,
         `Nom recette` TEXT,
         Type TEXT,
-        But TEXT,
-        description TEXT
+        But TEXT
     )
     """)
     
@@ -52,6 +51,16 @@ def init_db():
     """)
     
     conn.commit()
+
+# -----------------------------
+# Vérifier colonne description
+# -----------------------------
+def ensure_description_column():
+    cursor.execute("PRAGMA table_info(recettes)")
+    cols = [col[1] for col in cursor.fetchall()]
+    if "description" not in cols:
+        cursor.execute("ALTER TABLE recettes ADD COLUMN description TEXT")
+        conn.commit()
 
 # -----------------------------
 # Import CSV si table vide
@@ -71,11 +80,13 @@ def import_csv():
 # Extraire descriptions PDF
 # -----------------------------
 def extract_descriptions():
-    cursor.execute("ALTER TABLE recettes ADD COLUMN description TEXT")  # si déjà existante, ignore
-    conn.commit()
+    ensure_description_column()  # Vérifie/crée la colonne
     
-    # Récupérer noms recettes existantes
     df_recettes = pd.read_sql("SELECT `Nom recette` FROM recettes", conn)
+    
+    if not os.path.exists(PDF_FILE):
+        st.warning(f"PDF {PDF_FILE} non trouvé, les descriptions ne seront pas extraites.")
+        return
     
     pdf_text = ""
     with pdfplumber.open(PDF_FILE) as pdf:
@@ -98,7 +109,6 @@ def extract_descriptions():
         else:
             descriptions[nom] = ""
     
-    # Mettre à jour DB
     for nom, desc in descriptions.items():
         cursor.execute("UPDATE recettes SET description=? WHERE `Nom recette`=?", (desc, nom))
     conn.commit()
