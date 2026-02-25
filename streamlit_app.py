@@ -8,7 +8,7 @@ import os
 # Config fichiers
 # -----------------------------
 DB_NAME = "database.db"
-CSV_FILE = "recettes_alchimiques.csv"   # nom exact du CSV
+CSV_FILE = "Recettes_alchimiques.csv"   # nom exact du CSV
 PDF_FILE = "recettes_alchimiques.pdf"   # nom exact du PDF
 
 # -----------------------------
