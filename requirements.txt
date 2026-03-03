@@ -4,3 +4,4 @@ pdfplumber>=0.10.0
 chardet>=5.1.0
 unicodedata2>=14.0.0
 pillow>=10.0.0
+psycopg2-binary
