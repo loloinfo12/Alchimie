@@ -137,50 +137,50 @@ def get_recettes_joueur(joueur_id):
     cur.close()
     return [(r["id"], r["nom"], r["but"], r["ingredients"], r["utilisation"], r["enchantement"]) for r in rows]
 
-# -----------------------------
-# Initialisation unique
-# -----------------------------
 if "initialized" not in st.session_state:
     init_db()
     import_csv(silent=True)
     st.session_state["initialized"] = True
 
-# -----------------------------
-# Interface Streamlit
-# -----------------------------
+# Interface
 st.sidebar.title("🔐 Connexion")
-role = st.sidebar.radio("Je suis :", ["Administrateur", "Joueur"])
+role = st.sidebar.radio("Je suis :", ["Administrateur", "Joueur"], key="role")
 
 if role == "Administrateur":
     st.title("🛠 Interface Administrateur")
-    menu = st.sidebar.selectbox("Menu Admin", ["Gérer Joueurs", "Attribuer Recettes", "Mettre à jour Recettes"])
+    menu = st.sidebar.selectbox("Menu Admin", ["Gérer Joueurs", "Attribuer Recettes", "Mettre à jour Recettes"], key="menu")
 
     if menu == "Gérer Joueurs":
         st.header("👤 Gestion des joueurs")
-        nom = st.text_input("Nom du joueur")
-        niveau = st.number_input("Niveau", 1, 20)
-        if st.button("Ajouter"):
-            if nom.strip():
-                cur = get_cursor()
-                cur.execute("INSERT INTO joueurs (nom, niveau) VALUES (%s, %s)", (nom.strip(), niveau))
-                conn.commit()
-                cur.close()
-                st.success(f"Joueur '{nom}' ajouté !")
-                st.rerun()
-            else:
-                st.error("Nom du joueur vide !")
+        with st.form("form_ajout"):
+            nom = st.text_input("Nom du joueur")
+            niveau = st.number_input("Niveau", 1, 20)
+            submitted = st.form_submit_button("Ajouter")
+            if submitted:
+                if nom.strip():
+                    cur = get_cursor()
+                    cur.execute("INSERT INTO joueurs (nom, niveau) VALUES (%s, %s)", (nom.strip(), niveau))
+                    conn.commit()
+                    cur.close()
+                    st.success(f"Joueur '{nom}' ajouté !")
+                    st.rerun()
+                else:
+                    st.error("Nom du joueur vide !")
+
         joueurs = get_joueurs()
         if joueurs:
             st.subheader("Supprimer un joueur")
-            joueur = st.selectbox("Choisir joueur à supprimer", joueurs, format_func=lambda x: x[1])
-            if st.button("Supprimer"):
-                cur = get_cursor()
-                cur.execute("DELETE FROM joueur_recettes WHERE joueur_id=%s", (joueur[0],))
-                cur.execute("DELETE FROM joueurs WHERE id=%s", (joueur[0],))
-                conn.commit()
-                cur.close()
-                st.success(f"Joueur '{joueur[1]}' supprimé !")
-                st.rerun()
+            with st.form("form_suppression"):
+                joueur = st.selectbox("Choisir joueur à supprimer", joueurs, format_func=lambda x: x[1])
+                submitted_suppr = st.form_submit_button("Supprimer")
+                if submitted_suppr:
+                    cur = get_cursor()
+                    cur.execute("DELETE FROM joueur_recettes WHERE joueur_id=%s", (joueur[0],))
+                    cur.execute("DELETE FROM joueurs WHERE id=%s", (joueur[0],))
+                    conn.commit()
+                    cur.close()
+                    st.success(f"Joueur '{joueur[1]}' supprimé !")
+                    st.rerun()
         else:
             st.info("Aucun joueur enregistré.")
 
@@ -189,8 +189,11 @@ if role == "Administrateur":
         joueurs = get_joueurs()
         recettes = get_recettes()
         if joueurs and recettes:
-            joueur = st.selectbox("Choisir joueur", joueurs, format_func=lambda x: x[1])
-            recette = st.selectbox("Choisir recette", recettes, format_func=lambda x: x[1])
+            with st.form("form_attribution"):
+                joueur = st.selectbox("Choisir joueur", joueurs, format_func=lambda x: x[1])
+                recette = st.selectbox("Choisir recette", recettes, format_func=lambda x: x[1])
+                submitted_attr = st.form_submit_button("Attribuer")
+
             detail = get_recette_detail(recette[0])
             if detail:
                 with st.expander("📖 Aperçu de la recette"):
@@ -199,7 +202,8 @@ if role == "Administrateur":
                     st.markdown(f"**Utilisation :** {detail[4]}")
                     if detail[5]:
                         st.markdown(f"**Enchantement :** {detail[5]}")
-            if st.button("Attribuer"):
+
+            if submitted_attr:
                 cur = get_cursor()
                 try:
                     cur.execute(
@@ -219,14 +223,17 @@ if role == "Administrateur":
     elif menu == "Mettre à jour Recettes":
         st.header("🔄 Mise à jour des recettes")
         st.info(f"Source : {CSV_FILE}")
-        if st.button("Réimporter le CSV (efface et recharge)"):
-            cur = get_cursor()
-            cur.execute("DELETE FROM joueur_recettes")
-            cur.execute("DELETE FROM recettes")
-            conn.commit()
-            cur.close()
-            load_csv.clear()
-            import_csv(silent=False)
+        with st.form("form_reimport"):
+            submitted_reimport = st.form_submit_button("Réimporter le CSV (efface et recharge)")
+            if submitted_reimport:
+                cur = get_cursor()
+                cur.execute("DELETE FROM joueur_recettes")
+                cur.execute("DELETE FROM recettes")
+                conn.commit()
+                cur.close()
+                load_csv.clear()
+                import_csv(silent=False)
+                st.rerun()
 
 elif role == "Joueur":
     st.title("🧪 Mes Recettes Alchimiques")
@@ -234,7 +241,7 @@ elif role == "Joueur":
     if not joueurs:
         st.info("Aucun joueur enregistré. Contactez l'administrateur.")
     else:
-        joueur_nom = st.selectbox("Sélectionnez votre nom", [j[1] for j in joueurs])
+        joueur_nom = st.selectbox("Sélectionnez votre nom", [j[1] for j in joueurs], key="joueur_select")
         joueur_id = next(j[0] for j in joueurs if j[1] == joueur_nom)
         recettes = get_recettes_joueur(joueur_id)
         if recettes:
