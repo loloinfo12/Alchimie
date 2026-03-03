@@ -89,7 +89,7 @@ def import_csv():
             normalize_text(row.get("Nom recette", "")),
             normalize_text(row.get("Contenu", "")),
             normalize_text(row.get("But", "")),
-            normalize_text(row.get("Ingredients", "")),
+            normalize_text(row.get("Ingrédients", "")),
             normalize_text(row.get("Utilisation", "")),
             normalize_text(row.get("Enchantement", "")),
         ))
