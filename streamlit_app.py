@@ -10,12 +10,7 @@ CSV_FILE = "recettes_extraites.csv"
 
 @st.cache_resource
 def get_connection():
-    try:
-        conn = psycopg2.connect(st.secrets["supabase"]["url"])
-        return conn
-    except Exception as e:
-        st.error(f"Erreur de connexion : {e}")
-        st.stop()
+    return psycopg2.connect(st.secrets["supabase"]["url"])
 
 def get_cursor():
     global conn
