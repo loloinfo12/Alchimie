@@ -52,8 +52,6 @@ def init_db():
     conn.commit()
     cur.close()
 
-init_db()
-
 def normalize_text(s):
     if not isinstance(s, str):
         s = str(s) if pd.notna(s) else ""
@@ -139,8 +137,13 @@ def get_recettes_joueur(joueur_id):
     cur.close()
     return [(r["id"], r["nom"], r["but"], r["ingredients"], r["utilisation"], r["enchantement"]) for r in rows]
 
-# Import silencieux au démarrage
-import_csv(silent=True)
+# -----------------------------
+# Initialisation unique
+# -----------------------------
+if "initialized" not in st.session_state:
+    init_db()
+    import_csv(silent=True)
+    st.session_state["initialized"] = True
 
 # -----------------------------
 # Interface Streamlit
