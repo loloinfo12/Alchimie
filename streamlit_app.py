@@ -10,15 +10,7 @@ CSV_FILE = "recettes_extraites.csv"
 
 @st.cache_resource
 def get_connection():
-    return psycopg2.connect(
-        host=st.secrets["supabase"]["host"],
-        port=st.secrets["supabase"]["port"],
-        database=st.secrets["supabase"]["database"],
-        user=st.secrets["supabase"]["user"],
-        password=st.secrets["supabase"]["password"],
-        sslmode="require"
-    )
-
+    return psycopg2.connect(st.secrets["supabase"]["url"])
 conn = get_connection()
 
 def get_cursor():
