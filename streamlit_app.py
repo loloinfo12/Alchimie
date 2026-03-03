@@ -12,6 +12,8 @@ CSV_FILE = "recettes_extraites.csv"
 def get_connection():
     return psycopg2.connect(st.secrets["supabase"]["url"])
 
+conn = get_connection()
+
 def get_cursor():
     global conn
     try:
@@ -69,7 +71,7 @@ def load_csv(csv_file):
             df[col] = df[col].apply(normalize_text)
     return df
 
-def import_csv():
+def import_csv(silent=True):
     cur = get_cursor()
     cur.execute("SELECT COUNT(*) FROM recettes")
     count = cur.fetchone()["count"]
@@ -95,7 +97,8 @@ def import_csv():
         ))
     conn.commit()
     cur.close()
-    st.success(f"CSV importé avec succès ({len(df)} recettes) !")
+    if not silent:
+        st.success(f"✅ CSV importé avec succès ({len(df)} recettes) !")
 
 def get_joueurs():
     cur = get_cursor()
@@ -136,8 +139,12 @@ def get_recettes_joueur(joueur_id):
     cur.close()
     return [(r["id"], r["nom"], r["but"], r["ingredients"], r["utilisation"], r["enchantement"]) for r in rows]
 
-import_csv()
+# Import silencieux au démarrage
+import_csv(silent=True)
 
+# -----------------------------
+# Interface Streamlit
+# -----------------------------
 st.sidebar.title("🔐 Connexion")
 role = st.sidebar.radio("Je suis :", ["Administrateur", "Joueur"])
 
@@ -216,7 +223,7 @@ if role == "Administrateur":
             conn.commit()
             cur.close()
             load_csv.clear()
-            import_csv()
+            import_csv(silent=False)
 
 elif role == "Joueur":
     st.title("🧪 Mes Recettes Alchimiques")
