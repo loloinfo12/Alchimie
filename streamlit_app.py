@@ -12,14 +12,17 @@ CSV_FILE = "recettes_extraites.csv"
 def get_connection():
     return psycopg2.connect(st.secrets["supabase"]["url"])
 
-conn = get_connection()
+if "conn" not in st.session_state:
+    st.session_state.conn = get_connection()
+conn = st.session_state.conn
 
 def get_cursor():
     global conn
     try:
         conn.isolation_level
     except Exception:
-        conn = get_connection()
+        st.session_state.conn = get_connection()
+        conn = st.session_state.conn
     return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
 def init_db():
