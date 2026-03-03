@@ -6,6 +6,11 @@ import chardet
 import unicodedata
 import os
 
+# Patch anti-None
+from unittest.mock import patch
+_original_write = st.write
+st.write = lambda *a, **kw: None if (len(a)==1 and a[0] is None) else _original_write(*a, **kw)
+
 CSV_FILE = "recettes_extraites.csv"
 
 @st.cache_resource
