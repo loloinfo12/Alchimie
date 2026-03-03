@@ -28,6 +28,18 @@ def init_db():
         niveau INTEGER
     )
     """)
+
+    # Vérifier si la table recettes a la bonne structure
+    cursor.execute("PRAGMA table_info(recettes)")
+    cols = [col[1] for col in cursor.fetchall()]
+    expected_cols = {"id", "nom", "contenu", "but", "ingredients", "utilisation", "enchantement"}
+
+    # Si la table existe mais avec une mauvaise structure, on la recrée
+    if cols and not expected_cols.issubset(set(cols)):
+        cursor.execute("DROP TABLE IF EXISTS joueur_recettes")
+        cursor.execute("DROP TABLE IF EXISTS recettes")
+        conn.commit()
+
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS recettes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
