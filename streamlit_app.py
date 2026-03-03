@@ -12,18 +12,12 @@ CSV_FILE = "recettes_extraites.csv"
 def get_connection():
     return psycopg2.connect(st.secrets["supabase"]["url"])
 
-if "conn" not in st.session_state:
-    st.session_state.conn = get_connection()
-conn = st.session_state.conn
-
 def get_cursor():
-    global conn
     try:
-        conn.isolation_level
+        st.session_state.conn.isolation_level
     except Exception:
         st.session_state.conn = get_connection()
-        conn = st.session_state.conn
-    return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    return st.session_state.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
 def init_db():
     cur = get_cursor()
@@ -52,7 +46,7 @@ def init_db():
             UNIQUE(joueur_id, recette_id)
         )
     """)
-    conn.commit()
+    st.session_state.conn.commit()
     cur.close()
 
 def normalize_text(s):
@@ -96,7 +90,7 @@ def import_csv(silent=True):
             normalize_text(row.get("Utilisation", "")),
             normalize_text(row.get("Enchantement", "")),
         ))
-    conn.commit()
+    st.session_state.conn.commit()
     cur.close()
     if not silent:
         st.success(f"✅ CSV importé avec succès ({len(df)} recettes) !")
@@ -140,12 +134,19 @@ def get_recettes_joueur(joueur_id):
     cur.close()
     return [(r["id"], r["nom"], r["but"], r["ingredients"], r["utilisation"], r["enchantement"]) for r in rows]
 
-if "initialized" not in st.session_state:
-    init_db()
-    import_csv(silent=True)
-    st.session_state["initialized"] = True
+def setup():
+    if "conn" not in st.session_state:
+        st.session_state.conn = get_connection()
+    if "initialized" not in st.session_state:
+        init_db()
+        import_csv(silent=True)
+        st.session_state["initialized"] = True
 
-# Interface
+setup()
+
+# -----------------------------
+# Interface Streamlit
+# -----------------------------
 st.sidebar.title("🔐 Connexion")
 role = st.sidebar.radio("Je suis :", ["Administrateur", "Joueur"], key="role")
 
@@ -163,7 +164,7 @@ if role == "Administrateur":
                 if nom.strip():
                     cur = get_cursor()
                     cur.execute("INSERT INTO joueurs (nom, niveau) VALUES (%s, %s)", (nom.strip(), niveau))
-                    conn.commit()
+                    st.session_state.conn.commit()
                     cur.close()
                     st.success(f"Joueur '{nom}' ajouté !")
                     st.rerun()
@@ -180,7 +181,7 @@ if role == "Administrateur":
                     cur = get_cursor()
                     cur.execute("DELETE FROM joueur_recettes WHERE joueur_id=%s", (joueur[0],))
                     cur.execute("DELETE FROM joueurs WHERE id=%s", (joueur[0],))
-                    conn.commit()
+                    st.session_state.conn.commit()
                     cur.close()
                     st.success(f"Joueur '{joueur[1]}' supprimé !")
                     st.rerun()
@@ -213,10 +214,10 @@ if role == "Administrateur":
                         "INSERT INTO joueur_recettes (joueur_id, recette_id) VALUES (%s, %s)",
                         (joueur[0], recette[0])
                     )
-                    conn.commit()
+                    st.session_state.conn.commit()
                     st.success(f"Recette '{recette[1]}' attribuée à {joueur[1]} !")
                 except psycopg2.errors.UniqueViolation:
-                    conn.rollback()
+                    st.session_state.conn.rollback()
                     st.warning(f"'{recette[1]}' est déjà attribuée à {joueur[1]}.")
                 finally:
                     cur.close()
@@ -232,7 +233,7 @@ if role == "Administrateur":
                 cur = get_cursor()
                 cur.execute("DELETE FROM joueur_recettes")
                 cur.execute("DELETE FROM recettes")
-                conn.commit()
+                st.session_state.conn.commit()
                 cur.close()
                 load_csv.clear()
                 import_csv(silent=False)
