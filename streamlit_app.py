@@ -21,18 +21,11 @@ def get_connection():
 def get_cursor():
     try:
         st.session_state.conn.isolation_level
-        # Si la connexion est en état d'erreur, on rollback
-        if st.session_state.conn.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
-            st.session_state.conn.rollback()
     except Exception:
         st.session_state.conn = get_connection()
     return st.session_state.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    
+
 def init_db():
-    try:
-        st.session_state.conn.rollback()  # Nettoie toute transaction en échec
-    except Exception:
-        pass
     cur = get_cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS joueurs (
@@ -90,6 +83,7 @@ def init_db():
     """)
     st.session_state.conn.commit()
     cur.close()
+
 def normalize_text(s):
     if not isinstance(s, str):
         s = str(s) if pd.notna(s) else ""
@@ -440,57 +434,120 @@ def page_admin():
     # ── Gérer Composants ───────────────────────────────────────
     elif menu == "Gérer Composants":
         st.title("🧪 Gestion des composants principaux")
-        recettes = get_recettes()
+
+        tab1, tab2, tab3 = st.tabs(["🔗 Associer à une recette", "➕ Ajouter un composant", "📋 Vue d'ensemble"])
+
         composants = get_composants()
+        recettes = get_recettes()
 
-        if not recettes:
-            st.warning("Aucune recette disponible.")
-        elif not composants:
-            st.warning("Aucun composant disponible. Vérifiez que le fichier CSV est bien présent.")
-        else:
-            st.markdown("Associez un **composant principal** à chaque recette.")
-
-            recette = st.selectbox(
-                "Choisir une recette",
-                recettes,
-                format_func=lambda x: x[1],
-                key="sel_recette_comp"
-            )
-
-            # Aperçu recette
-            detail = get_recette_detail(recette[0])
-            if detail:
-                with st.expander("📖 Détail de la recette"):
-                    st.markdown(f"**But :** {detail[2]}")
-                    st.markdown(f"**Ingrédients :** {detail[3]}")
-
-            # Composant actuel
-            composant_actuel = get_composant_principal(recette[0])
-            if composant_actuel:
-                st.info(f"Composant principal actuel : **{composant_actuel[1]}** *(type : {composant_actuel[2]})*")
+        # ── Tab 1 : Associer composant à recette ──
+        with tab1:
+            if not recettes:
+                st.warning("Aucune recette disponible.")
+            elif not composants:
+                st.warning("Aucun composant disponible. Ajoutez-en via l'onglet '➕ Ajouter un composant'.")
             else:
-                st.caption("Aucun composant principal défini pour cette recette.")
+                st.markdown("Associez un **composant principal** à chaque recette.")
 
-            # Filtre par type
-            types = sorted(set(c[2] for c in composants))
-            type_filtre = st.selectbox("Filtrer par type", ["Tous"] + types, key="filtre_type")
-            composants_filtres = composants if type_filtre == "Tous" else [c for c in composants if c[2] == type_filtre]
+                recette = st.selectbox(
+                    "Choisir une recette",
+                    recettes,
+                    format_func=lambda x: x[1],
+                    key="sel_recette_comp"
+                )
 
-            nouveau_composant = st.selectbox(
-                "Choisir le composant principal",
-                composants_filtres,
-                format_func=lambda x: f"{x[1]} ({x[2]})",
-                key="sel_composant"
-            )
+                detail = get_recette_detail(recette[0])
+                if detail:
+                    with st.expander("📖 Détail de la recette"):
+                        st.markdown(f"**But :** {detail[2]}")
+                        st.markdown(f"**Ingrédients :** {detail[3]}")
 
-            if st.button("💾 Enregistrer le composant principal"):
-                set_composant_principal(recette[0], nouveau_composant[0])
-                st.success(f"Composant principal de '{recette[1]}' défini : **{nouveau_composant[1]}**")
-                st.rerun()
+                composant_actuel = get_composant_principal(recette[0])
+                if composant_actuel:
+                    st.info(f"Composant principal actuel : **{composant_actuel[1]}** *(type : {composant_actuel[2]})*")
+                else:
+                    st.caption("Aucun composant principal défini pour cette recette.")
 
-            # Vue d'ensemble
+                types = sorted(set(c[2] for c in composants))
+                type_filtre = st.selectbox("Filtrer par type", ["Tous"] + types, key="filtre_type")
+                composants_filtres = composants if type_filtre == "Tous" else [c for c in composants if c[2] == type_filtre]
+
+                nouveau_composant = st.selectbox(
+                    "Choisir le composant principal",
+                    composants_filtres,
+                    format_func=lambda x: f"{x[1]} ({x[2]})",
+                    key="sel_composant"
+                )
+
+                if st.button("💾 Enregistrer le composant principal"):
+                    set_composant_principal(recette[0], nouveau_composant[0])
+                    st.success(f"Composant principal de '{recette[1]}' défini : **{nouveau_composant[1]}**")
+                    st.rerun()
+
+        # ── Tab 2 : Ajouter un composant manuellement ──
+        with tab2:
+            st.subheader("Ajouter un composant à la base")
+            TYPES_COMPOSANTS = [
+                "Animaux et créatures et morceaux",
+                "Plantes, champignons, fruits, baies",
+                "Sels, Poudres et minéraux",
+                "Autre"
+            ]
+            with st.form("form_ajout_composant"):
+                new_nom = st.text_input("Nom du composant *")
+                new_type = st.selectbox("Type *", TYPES_COMPOSANTS)
+                new_jet = st.text_input("Jet de connaissance (optionnel)")
+                new_info = st.text_area("Information (optionnel)")
+                submitted_comp = st.form_submit_button("➕ Ajouter")
+                if submitted_comp:
+                    if new_nom.strip():
+                        cur = get_cursor()
+                        try:
+                            cur.execute("""
+                                INSERT INTO composants (nom, type, jet_connaissance, information)
+                                VALUES (%s, %s, %s, %s)
+                            """, (
+                                normalize_text(new_nom),
+                                new_type,
+                                normalize_text(new_jet),
+                                normalize_text(new_info),
+                            ))
+                            st.session_state.conn.commit()
+                            st.success(f"Composant **{new_nom}** ajouté avec succès !")
+                            st.rerun()
+                        except psycopg2.errors.UniqueViolation:
+                            st.session_state.conn.rollback()
+                            st.error(f"Un composant nommé '{new_nom}' existe déjà.")
+                        finally:
+                            cur.close()
+                    else:
+                        st.error("Le nom est obligatoire.")
+
+            # Liste des composants ajoutés manuellement (ceux hors CSV)
             st.divider()
-            st.subheader("📋 Vue d'ensemble")
+            st.subheader("🗑️ Supprimer un composant")
+            if composants:
+                with st.form("form_suppr_composant"):
+                    comp_suppr = st.selectbox(
+                        "Choisir un composant à supprimer",
+                        composants,
+                        format_func=lambda x: f"{x[1]} ({x[2]})"
+                    )
+                    submitted_suppr_c = st.form_submit_button("Supprimer")
+                    if submitted_suppr_c:
+                        cur = get_cursor()
+                        cur.execute("DELETE FROM joueur_composants WHERE composant_id=%s", (comp_suppr[0],))
+                        cur.execute("DELETE FROM recette_composant WHERE composant_id=%s", (comp_suppr[0],))
+                        cur.execute("DELETE FROM composants WHERE id=%s", (comp_suppr[0],))
+                        st.session_state.conn.commit()
+                        cur.close()
+                        st.success(f"Composant '{comp_suppr[1]}' supprimé.")
+                        st.rerun()
+            else:
+                st.info("Aucun composant disponible.")
+
+        # ── Tab 3 : Vue d'ensemble ──
+        with tab3:
             cur = get_cursor()
             cur.execute("""
                 SELECT r.nom AS recette, c.nom AS composant, c.type AS type
