@@ -493,22 +493,22 @@ def page_admin():
             st.subheader("📋 Vue d'ensemble")
             cur = get_cursor()
             cur.execute("""
-            SELECT r.nom AS recette, c.nom AS composant, c.type AS type
-            FROM recettes r
-            LEFT JOIN recette_composant rc ON r.id = rc.recette_id
-            LEFT JOIN composants c ON rc.composant_id = c.id
-            ORDER BY r.nom
+                SELECT r.nom AS recette, c.nom AS composant, c.type AS type
+                FROM recettes r
+                LEFT JOIN recette_composant rc ON r.id = rc.recette_id
+                LEFT JOIN composants c ON rc.composant_id = c.id
+                ORDER BY r.nom
             """)
             rows = cur.fetchall()
             cur.close()
-if rows:
-    df_view = pd.DataFrame([dict(r) for r in rows])
-    df_view.columns = ["Recette", "Composant principal", "Type"]
-    df_view["Composant principal"] = df_view["Composant principal"].fillna("⚠️ Non défini")
-    df_view["Type"] = df_view["Type"].fillna("")
-    st.dataframe(df_view, use_container_width=True, hide_index=True)
-else:
-    st.info("Aucune recette trouvée.")
+            if rows:
+                df_view = pd.DataFrame([dict(r) for r in rows])
+                df_view.columns = ["Recette", "Composant principal", "Type"]
+                df_view["Composant principal"] = df_view["Composant principal"].fillna("⚠️ Non défini")
+                df_view["Type"] = df_view["Type"].fillna("")
+                st.dataframe(df_view, use_container_width=True, hide_index=True)
+            else:
+                st.info("Aucune recette trouvée.")
 
     # ── Mettre à jour Recettes ─────────────────────────────────
     elif menu == "Mettre à jour Recettes":
