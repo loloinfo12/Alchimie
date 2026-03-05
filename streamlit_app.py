@@ -21,11 +21,18 @@ def get_connection():
 def get_cursor():
     try:
         st.session_state.conn.isolation_level
+        # Si la connexion est en état d'erreur, on rollback
+        if st.session_state.conn.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
+            st.session_state.conn.rollback()
     except Exception:
         st.session_state.conn = get_connection()
     return st.session_state.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
+    
 def init_db():
+    try:
+        st.session_state.conn.rollback()  # Nettoie toute transaction en échec
+    except Exception:
+        pass
     cur = get_cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS joueurs (
@@ -83,7 +90,6 @@ def init_db():
     """)
     st.session_state.conn.commit()
     cur.close()
-
 def normalize_text(s):
     if not isinstance(s, str):
         s = str(s) if pd.notna(s) else ""
