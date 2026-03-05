@@ -277,40 +277,38 @@ def page_admin():
             st.info("Aucun joueur enregistré.")
 
     elif menu == "Attribuer Recettes":
-        st.title("📜 Attribution des recettes")
-        joueurs = get_joueurs()
-        recettes = get_recettes()
-        if joueurs and recettes:
-            with st.form("form_attribution"):
-                joueur = st.selectbox("Choisir joueur", joueurs, format_func=lambda x: x[1])
-                recette = st.selectbox("Choisir recette", recettes, format_func=lambda x: x[1])
-                submitted_attr = st.form_submit_button("Attribuer")
+    st.title("📜 Attribution des recettes")
+    joueurs = get_joueurs()
+    recettes = get_recettes()
+    if joueurs and recettes:
+        joueur = st.selectbox("Choisir joueur", joueurs, format_func=lambda x: x[1])
+        recette = st.selectbox("Choisir recette", recettes, format_func=lambda x: x[1])
 
-            detail = get_recette_detail(recette[0])
-            if detail:
-                with st.expander("📖 Aperçu de la recette"):
-                    st.markdown(f"**But :** {detail[2]}")
-                    st.markdown(f"**Ingrédients :** {detail[3]}")
-                    st.markdown(f"**Utilisation :** {detail[4]}")
-                    if detail[5]:
-                        st.markdown(f"**Enchantement :** {detail[5]}")
+        detail = get_recette_detail(recette[0])
+        if detail:
+            with st.expander("📖 Aperçu de la recette", expanded=True):
+                st.markdown(f"**But :** {detail[2]}")
+                st.markdown(f"**Ingrédients :** {detail[3]}")
+                st.markdown(f"**Utilisation :** {detail[4]}")
+                if detail[5]:
+                    st.markdown(f"**Enchantement :** {detail[5]}")
 
-            if submitted_attr:
-                cur = get_cursor()
-                try:
-                    cur.execute(
-                        "INSERT INTO joueur_recettes (joueur_id, recette_id) VALUES (%s, %s)",
-                        (joueur[0], recette[0])
-                    )
-                    st.session_state.conn.commit()
-                    st.success(f"Recette '{recette[1]}' attribuée à {joueur[1]} !")
-                except psycopg2.errors.UniqueViolation:
-                    st.session_state.conn.rollback()
-                    st.warning(f"'{recette[1]}' est déjà attribuée à {joueur[1]}.")
-                finally:
-                    cur.close()
-        else:
-            st.warning("Il faut au moins un joueur et une recette.")
+        if st.button("Attribuer"):
+            cur = get_cursor()
+            try:
+                cur.execute(
+                    "INSERT INTO joueur_recettes (joueur_id, recette_id) VALUES (%s, %s)",
+                    (joueur[0], recette[0])
+                )
+                st.session_state.conn.commit()
+                st.success(f"Recette '{recette[1]}' attribuée à {joueur[1]} !")
+            except psycopg2.errors.UniqueViolation:
+                st.session_state.conn.rollback()
+                st.warning(f"'{recette[1]}' est déjà attribuée à {joueur[1]}.")
+            finally:
+                cur.close()
+    else:
+        st.warning("Il faut au moins un joueur et une recette.")
 
     elif menu == "Mettre à jour Recettes":
         st.title("🔄 Mise à jour des recettes")
