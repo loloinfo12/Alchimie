@@ -461,7 +461,11 @@ def page_admin():
                     with st.expander("📖 Détail de la recette"):
                         st.markdown(f"**But :** {detail[2]}")
                         st.markdown(f"**Ingrédients :** {detail[3]}")
-
+                        if detail[4]:
+                            st.markdown(f"**Utilisation :** {detail[4]}")
+                        if detail[5]:
+                            st.markdown(f"**Enchantement :** {detail[5]}")
+                        
                 composant_actuel = get_composant_principal(recette[0])
                 if composant_actuel:
                     st.info(f"Composant principal actuel : **{composant_actuel[1]}** *(type : {composant_actuel[2]})*")
