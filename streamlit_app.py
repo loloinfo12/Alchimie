@@ -8,6 +8,7 @@ import os
 import bcrypt
 
 CSV_FILE = "recettes_extraites.csv"
+CSV_COMPOSANTS = "Composants_globaux.csv"
 
 # Patch anti-None
 _original_write = st.write
@@ -52,7 +53,31 @@ def init_db():
             UNIQUE(joueur_id, recette_id)
         )
     """)
-    # Ajouter colonne mot_de_passe si elle n'existe pas (migration)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS composants (
+            id SERIAL PRIMARY KEY,
+            nom TEXT UNIQUE,
+            type TEXT,
+            jet_connaissance TEXT,
+            information TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS recette_composant (
+            recette_id INTEGER REFERENCES recettes(id),
+            composant_id INTEGER REFERENCES composants(id),
+            PRIMARY KEY (recette_id, composant_id)
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS joueur_composants (
+            joueur_id INTEGER REFERENCES joueurs(id),
+            composant_id INTEGER REFERENCES composants(id),
+            recette_id INTEGER REFERENCES recettes(id),
+            quantite INTEGER DEFAULT 0,
+            PRIMARY KEY (joueur_id, composant_id, recette_id)
+        )
+    """)
     cur.execute("""
         ALTER TABLE joueurs ADD COLUMN IF NOT EXISTS mot_de_passe TEXT
     """)
@@ -103,7 +128,38 @@ def import_csv(silent=True):
     st.session_state.conn.commit()
     cur.close()
     if not silent:
-        st.success(f"✅ CSV importé avec succès ({len(df)} recettes) !")
+        st.success(f"✅ CSV recettes importé avec succès ({len(df)} recettes) !")
+
+def import_composants(silent=True):
+    cur = get_cursor()
+    cur.execute("SELECT COUNT(*) FROM composants")
+    count = cur.fetchone()["count"]
+    cur.close()
+    if count > 0:
+        return
+    if not os.path.exists(CSV_COMPOSANTS):
+        st.warning(f"Fichier {CSV_COMPOSANTS} introuvable, composants non importés.")
+        return
+    df = load_csv(CSV_COMPOSANTS)
+    cur = get_cursor()
+    for _, row in df.iterrows():
+        nom = normalize_text(row.get("Composants", ""))
+        if not nom:
+            continue
+        cur.execute("""
+            INSERT INTO composants (nom, type, jet_connaissance, information)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (nom) DO NOTHING
+        """, (
+            nom,
+            normalize_text(row.get("Type", "")),
+            normalize_text(row.get("Jet de connaissance", "")),
+            normalize_text(row.get("information", "")),
+        ))
+    st.session_state.conn.commit()
+    cur.close()
+    if not silent:
+        st.success(f"✅ Composants importés avec succès ({len(df)} composants) !")
 
 def get_joueurs():
     cur = get_cursor()
@@ -144,6 +200,59 @@ def get_recettes_joueur(joueur_id):
     cur.close()
     return [(r["id"], r["nom"], r["but"], r["ingredients"], r["utilisation"], r["enchantement"]) for r in rows]
 
+def get_composants():
+    cur = get_cursor()
+    cur.execute("SELECT id, nom, type FROM composants ORDER BY nom")
+    rows = cur.fetchall()
+    cur.close()
+    return [(r["id"], r["nom"], r["type"]) for r in rows]
+
+def get_composant_principal(recette_id):
+    cur = get_cursor()
+    cur.execute("""
+        SELECT c.id, c.nom, c.type, c.jet_connaissance, c.information
+        FROM composants c
+        JOIN recette_composant rc ON c.id = rc.composant_id
+        WHERE rc.recette_id = %s
+        LIMIT 1
+    """, (recette_id,))
+    row = cur.fetchone()
+    cur.close()
+    if row:
+        return (row["id"], row["nom"], row["type"], row["jet_connaissance"], row["information"])
+    return None
+
+def set_composant_principal(recette_id, composant_id):
+    cur = get_cursor()
+    cur.execute("DELETE FROM recette_composant WHERE recette_id=%s", (recette_id,))
+    cur.execute(
+        "INSERT INTO recette_composant (recette_id, composant_id) VALUES (%s, %s)",
+        (recette_id, composant_id)
+    )
+    st.session_state.conn.commit()
+    cur.close()
+
+def get_quantite_composant(joueur_id, composant_id, recette_id):
+    cur = get_cursor()
+    cur.execute("""
+        SELECT quantite FROM joueur_composants
+        WHERE joueur_id=%s AND composant_id=%s AND recette_id=%s
+    """, (joueur_id, composant_id, recette_id))
+    row = cur.fetchone()
+    cur.close()
+    return row["quantite"] if row else 0
+
+def set_quantite_composant(joueur_id, composant_id, recette_id, quantite):
+    cur = get_cursor()
+    cur.execute("""
+        INSERT INTO joueur_composants (joueur_id, composant_id, recette_id, quantite)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (joueur_id, composant_id, recette_id)
+        DO UPDATE SET quantite = EXCLUDED.quantite
+    """, (joueur_id, composant_id, recette_id, quantite))
+    st.session_state.conn.commit()
+    cur.close()
+
 def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -158,6 +267,7 @@ def setup():
     if "initialized" not in st.session_state:
         init_db()
         import_csv(silent=True)
+        import_composants(silent=True)
         st.session_state["initialized"] = True
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
@@ -188,7 +298,6 @@ def page_connexion():
                     st.rerun()
                 else:
                     st.error("Mot de passe incorrect.")
-
     else:
         joueurs = get_joueurs()
         if not joueurs:
@@ -218,8 +327,13 @@ def page_admin():
         st.session_state.role = None
         st.rerun()
 
-    menu = st.sidebar.selectbox("Menu", ["Gérer Joueurs", "Attribuer Recettes", "Mettre à jour Recettes"], key="menu")
+    menu = st.sidebar.selectbox(
+        "Menu",
+        ["Gérer Joueurs", "Attribuer Recettes", "Gérer Composants", "Mettre à jour Recettes"],
+        key="menu"
+    )
 
+    # ── Gérer Joueurs ──────────────────────────────────────────
     if menu == "Gérer Joueurs":
         st.title("👤 Gestion des joueurs")
         with st.form("form_ajout"):
@@ -267,6 +381,7 @@ def page_admin():
                 submitted_suppr = st.form_submit_button("Supprimer")
                 if submitted_suppr:
                     cur = get_cursor()
+                    cur.execute("DELETE FROM joueur_composants WHERE joueur_id=%s", (joueur_suppr[0],))
                     cur.execute("DELETE FROM joueur_recettes WHERE joueur_id=%s", (joueur_suppr[0],))
                     cur.execute("DELETE FROM joueurs WHERE id=%s", (joueur_suppr[0],))
                     st.session_state.conn.commit()
@@ -276,6 +391,7 @@ def page_admin():
         else:
             st.info("Aucun joueur enregistré.")
 
+    # ── Attribuer Recettes ─────────────────────────────────────
     elif menu == "Attribuer Recettes":
         st.title("📜 Attribution des recettes")
         joueurs = get_joueurs()
@@ -285,6 +401,7 @@ def page_admin():
             recette = st.selectbox("Choisir recette", recettes, format_func=lambda x: x[1])
 
             detail = get_recette_detail(recette[0])
+            composant = get_composant_principal(recette[0])
             if detail:
                 with st.expander("📖 Aperçu de la recette", expanded=True):
                     st.markdown(f"**But :** {detail[2]}")
@@ -292,6 +409,10 @@ def page_admin():
                     st.markdown(f"**Utilisation :** {detail[4]}")
                     if detail[5]:
                         st.markdown(f"**Enchantement :** {detail[5]}")
+                    if composant:
+                        st.markdown(f"**🧪 Composant principal :** {composant[1]} *(type : {composant[2]})*")
+                    else:
+                        st.caption("⚠️ Aucun composant principal défini pour cette recette.")
 
             if st.button("Attribuer"):
                 cur = get_cursor()
@@ -310,20 +431,107 @@ def page_admin():
         else:
             st.warning("Il faut au moins un joueur et une recette.")
 
+    # ── Gérer Composants ───────────────────────────────────────
+    elif menu == "Gérer Composants":
+        st.title("🧪 Gestion des composants principaux")
+        recettes = get_recettes()
+        composants = get_composants()
+
+        if not recettes:
+            st.warning("Aucune recette disponible.")
+        elif not composants:
+            st.warning("Aucun composant disponible. Vérifiez que le fichier CSV est bien présent.")
+        else:
+            st.markdown("Associez un **composant principal** à chaque recette.")
+
+            recette = st.selectbox(
+                "Choisir une recette",
+                recettes,
+                format_func=lambda x: x[1],
+                key="sel_recette_comp"
+            )
+
+            # Aperçu recette
+            detail = get_recette_detail(recette[0])
+            if detail:
+                with st.expander("📖 Détail de la recette"):
+                    st.markdown(f"**But :** {detail[2]}")
+                    st.markdown(f"**Ingrédients :** {detail[3]}")
+
+            # Composant actuel
+            composant_actuel = get_composant_principal(recette[0])
+            if composant_actuel:
+                st.info(f"Composant principal actuel : **{composant_actuel[1]}** *(type : {composant_actuel[2]})*")
+            else:
+                st.caption("Aucun composant principal défini pour cette recette.")
+
+            # Filtre par type
+            types = sorted(set(c[2] for c in composants))
+            type_filtre = st.selectbox("Filtrer par type", ["Tous"] + types, key="filtre_type")
+            composants_filtres = composants if type_filtre == "Tous" else [c for c in composants if c[2] == type_filtre]
+
+            nouveau_composant = st.selectbox(
+                "Choisir le composant principal",
+                composants_filtres,
+                format_func=lambda x: f"{x[1]} ({x[2]})",
+                key="sel_composant"
+            )
+
+            if st.button("💾 Enregistrer le composant principal"):
+                set_composant_principal(recette[0], nouveau_composant[0])
+                st.success(f"Composant principal de '{recette[1]}' défini : **{nouveau_composant[1]}**")
+                st.rerun()
+
+            # Vue d'ensemble
+            st.divider()
+            st.subheader("📋 Vue d'ensemble")
+            cur = get_cursor()
+            cur.execute("""
+                SELECT r.nom AS recette, c.nom AS composant, c.type
+                FROM recettes r
+                LEFT JOIN recette_composant rc ON r.id = rc.recette_id
+                LEFT JOIN composants c ON rc.composant_id = c.id
+                ORDER BY r.nom
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            df_view = pd.DataFrame(rows, columns=["Recette", "Composant principal", "Type"])
+            df_view["Composant principal"] = df_view["Composant principal"].fillna("⚠️ Non défini")
+            st.dataframe(df_view, use_container_width=True, hide_index=True)
+
+    # ── Mettre à jour Recettes ─────────────────────────────────
     elif menu == "Mettre à jour Recettes":
         st.title("🔄 Mise à jour des recettes")
-        st.info(f"Source : {CSV_FILE}")
-        with st.form("form_reimport"):
-            submitted_reimport = st.form_submit_button("Réimporter le CSV (efface et recharge)")
-            if submitted_reimport:
-                cur = get_cursor()
-                cur.execute("DELETE FROM joueur_recettes")
-                cur.execute("DELETE FROM recettes")
-                st.session_state.conn.commit()
-                cur.close()
-                load_csv.clear()
-                import_csv(silent=False)
-                st.rerun()
+        st.info(f"Source recettes : {CSV_FILE}  |  Source composants : {CSV_COMPOSANTS}")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            with st.form("form_reimport_recettes"):
+                submitted_r = st.form_submit_button("♻️ Réimporter les recettes")
+                if submitted_r:
+                    cur = get_cursor()
+                    cur.execute("DELETE FROM joueur_composants")
+                    cur.execute("DELETE FROM recette_composant")
+                    cur.execute("DELETE FROM joueur_recettes")
+                    cur.execute("DELETE FROM recettes")
+                    st.session_state.conn.commit()
+                    cur.close()
+                    load_csv.clear()
+                    import_csv(silent=False)
+                    st.rerun()
+        with col2:
+            with st.form("form_reimport_composants"):
+                submitted_c = st.form_submit_button("♻️ Réimporter les composants")
+                if submitted_c:
+                    cur = get_cursor()
+                    cur.execute("DELETE FROM joueur_composants")
+                    cur.execute("DELETE FROM recette_composant")
+                    cur.execute("DELETE FROM composants")
+                    st.session_state.conn.commit()
+                    cur.close()
+                    load_csv.clear()
+                    import_composants(silent=False)
+                    st.rerun()
 
 # -----------------------------
 # Page Joueur
@@ -339,20 +547,64 @@ def page_joueur():
 
     st.title("🧪 Mes Recettes Alchimiques")
     recettes = get_recettes_joueur(st.session_state.joueur_id)
-    if recettes:
-        st.markdown(f"**{len(recettes)} recette(s) disponible(s)**")
-        for r in recettes:
-            with st.expander(f"📜 {r[1]}"):
-                if r[2]:
-                    st.markdown(f"**🎯 But :** {r[2]}")
-                if r[3]:
-                    st.markdown(f"**🌿 Ingrédients :** {r[3]}")
-                if r[4]:
-                    st.markdown(f"**⚗️ Utilisation :** {r[4]}")
-                if r[5]:
-                    st.markdown(f"**✨ Enchantement :** {r[5]}")
-    else:
+
+    if not recettes:
         st.info("Aucune recette attribuée pour le moment.")
+        return
+
+    st.markdown(f"**{len(recettes)} recette(s) disponible(s)**")
+
+    for r in recettes:
+        recette_id = r[0]
+        composant = get_composant_principal(recette_id)
+        quantite_actuelle = 0
+        if composant:
+            quantite_actuelle = get_quantite_composant(
+                st.session_state.joueur_id, composant[0], recette_id
+            )
+
+        label = f"📜 {r[1]}"
+        if composant:
+            label += f"  —  🧪 {composant[1]} : {quantite_actuelle}"
+
+        with st.expander(label):
+            if r[2]:
+                st.markdown(f"**🎯 But :** {r[2]}")
+            if r[3]:
+                st.markdown(f"**🌿 Ingrédients :** {r[3]}")
+            if r[4]:
+                st.markdown(f"**⚗️ Utilisation :** {r[4]}")
+            if r[5]:
+                st.markdown(f"**✨ Enchantement :** {r[5]}")
+
+            if composant:
+                st.divider()
+                st.markdown(f"**🧪 Composant principal : {composant[1]}**")
+                st.caption(f"Type : {composant[2]}" + (f"  |  Jet : {composant[3]}" if composant[3] else ""))
+                if composant[4]:
+                    st.caption(f"ℹ️ {composant[4]}")
+
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col1:
+                    if st.button("➖", key=f"minus_{recette_id}"):
+                        nouvelle_qte = max(0, quantite_actuelle - 1)
+                        set_quantite_composant(
+                            st.session_state.joueur_id, composant[0], recette_id, nouvelle_qte
+                        )
+                        st.rerun()
+                with col2:
+                    st.markdown(
+                        f"<div style='text-align:center; font-size:1.4em; font-weight:bold'>{quantite_actuelle}</div>",
+                        unsafe_allow_html=True
+                    )
+                with col3:
+                    if st.button("➕", key=f"plus_{recette_id}"):
+                        set_quantite_composant(
+                            st.session_state.joueur_id, composant[0], recette_id, quantite_actuelle + 1
+                        )
+                        st.rerun()
+            else:
+                st.caption("⚠️ Aucun composant principal défini pour cette recette.")
 
 # -----------------------------
 # Routage
