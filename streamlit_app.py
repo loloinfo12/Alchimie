@@ -261,6 +261,18 @@ def check_password(password, hashed):
         return False
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
+def get_suggestions_composants(detail, composants):
+    """Cherche les composants dont le nom apparaît dans le texte de la recette."""
+    if not detail:
+        return []
+    texte_recette = " ".join([
+        detail[1] or "",  # contenu
+        detail[2] or "",  # but
+        detail[3] or "",  # ingredients
+        detail[4] or "",  # utilisation
+    ]).lower()
+    return [c for c in composants if c[1].lower() in texte_recette]
+
 def setup():
     if "conn" not in st.session_state:
         st.session_state.conn = get_connection()
@@ -465,13 +477,37 @@ def page_admin():
                             st.markdown(f"**Utilisation :** {detail[4]}")
                         if detail[5]:
                             st.markdown(f"**Enchantement :** {detail[5]}")
-                        
+
                 composant_actuel = get_composant_principal(recette[0])
                 if composant_actuel:
                     st.info(f"Composant principal actuel : **{composant_actuel[1]}** *(type : {composant_actuel[2]})*")
                 else:
                     st.caption("Aucun composant principal défini pour cette recette.")
 
+                # ── Suggestions automatiques ──────────────────
+                suggestions = get_suggestions_composants(detail, composants)
+                if suggestions:
+                    st.markdown("#### 💡 Composants suggérés")
+                    st.caption("Ces composants ont été trouvés dans le texte de la recette :")
+                    cols = st.columns(min(len(suggestions), 3))
+                    for i, sug in enumerate(suggestions[:3]):
+                        with cols[i]:
+                            st.markdown(f"**{sug[1]}**")
+                            st.caption(sug[2])
+                            if st.button(
+                                "✅ Choisir",
+                                key=f"sug_{recette[0]}_{sug[0]}"
+                            ):
+                                set_composant_principal(recette[0], sug[0])
+                                st.success(f"Composant principal défini : **{sug[1]}**")
+                                st.rerun()
+                else:
+                    st.caption("💬 Aucun composant de la base trouvé automatiquement dans ce texte.")
+
+                st.divider()
+
+                # ── Sélection manuelle ────────────────────────
+                st.markdown("#### 🔍 Ou choisir manuellement")
                 types = sorted(set(c[2] for c in composants))
                 type_filtre = st.selectbox("Filtrer par type", ["Tous"] + types, key="filtre_type")
                 composants_filtres = composants if type_filtre == "Tous" else [c for c in composants if c[2] == type_filtre]
@@ -527,7 +563,6 @@ def page_admin():
                     else:
                         st.error("Le nom est obligatoire.")
 
-            # Liste des composants ajoutés manuellement (ceux hors CSV)
             st.divider()
             st.subheader("🗑️ Supprimer un composant")
             if composants:
