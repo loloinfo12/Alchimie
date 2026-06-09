@@ -53,7 +53,16 @@ def init_db():
     """)
     # Ajout de la contrainte UNIQUE sur nom si elle n'existe pas
     cur.execute("""
-        ALTER TABLE recettes ADD CONSTRAINT IF NOT EXISTS recettes_nom_unique UNIQUE (nom)
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'recettes_nom_unique'
+            ) THEN
+                ALTER TABLE recettes ADD CONSTRAINT recettes_nom_unique UNIQUE (nom);
+            END IF;
+        END
+        $$;
     """)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS joueur_recettes (
