@@ -31,6 +31,10 @@ def get_cursor():
     return st.session_state.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
 def init_db():
+    try:
+        st.session_state.conn.rollback()
+    except Exception:
+        pass
     cur = get_cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS joueurs (
@@ -120,11 +124,10 @@ def load_csv(csv_file):
     return df
 
 def import_csv(silent=True):
-    """
-    Import ou met à jour les recettes depuis le CSV.
-    Utilise un upsert basé sur le nom pour préserver les IDs existants
-    et donc toutes les associations composants/joueurs.
-    """
+    try:
+        st.session_state.conn.rollback()
+    except Exception:
+        pass
     if not os.path.exists(CSV_FILE):
         st.error(f"Fichier {CSV_FILE} introuvable.")
         return
@@ -157,6 +160,10 @@ def import_csv(silent=True):
         st.success(f"✅ Recettes mises à jour ({len(df)} recettes traitées) !")
 
 def import_composants(silent=True):
+    try:
+        st.session_state.conn.rollback()
+    except Exception:
+        pass
     cur = get_cursor()
     cur.execute("SELECT COUNT(*) FROM composants")
     count = cur.fetchone()["count"]
