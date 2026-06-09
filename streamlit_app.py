@@ -132,21 +132,12 @@ def import_csv(silent=True):
         st.error(f"Fichier {CSV_FILE} introuvable.")
         return
     df = load_csv(CSV_FILE)
-    cur = get_cursor()
+    valeurs = []
     for _, row in df.iterrows():
         nom = normalize_text(row.get("Nom recette", ""))
         if not nom:
             continue
-        cur.execute("""
-            INSERT INTO recettes (nom, contenu, but, ingredients, utilisation, enchantement)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (nom) DO UPDATE SET
-                contenu      = EXCLUDED.contenu,
-                but          = EXCLUDED.but,
-                ingredients  = EXCLUDED.ingredients,
-                utilisation  = EXCLUDED.utilisation,
-                enchantement = EXCLUDED.enchantement
-        """, (
+        valeurs.append((
             nom,
             normalize_text(row.get("Contenu", "")),
             normalize_text(row.get("But", "")),
@@ -154,10 +145,23 @@ def import_csv(silent=True):
             normalize_text(row.get("Utilisation", "")),
             normalize_text(row.get("Enchantement", "")),
         ))
+    if not valeurs:
+        return
+    cur = get_cursor()
+    psycopg2.extras.execute_values(cur, """
+        INSERT INTO recettes (nom, contenu, but, ingredients, utilisation, enchantement)
+        VALUES %s
+        ON CONFLICT (nom) DO UPDATE SET
+            contenu      = EXCLUDED.contenu,
+            but          = EXCLUDED.but,
+            ingredients  = EXCLUDED.ingredients,
+            utilisation  = EXCLUDED.utilisation,
+            enchantement = EXCLUDED.enchantement
+    """, valeurs)
     st.session_state.conn.commit()
     cur.close()
     if not silent:
-        st.success(f"✅ Recettes mises à jour ({len(df)} recettes traitées) !")
+        st.success(f"✅ Recettes mises à jour ({len(valeurs)} recettes traitées) !")
 
 def import_composants(silent=True):
     try:
