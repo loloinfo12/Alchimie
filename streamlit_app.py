@@ -14,17 +14,22 @@ CSV_COMPOSANTS = "Composants_globaux.csv"
 _original_write = st.write
 st.write = lambda *a, **kw: None if (len(a)==1 and a[0] is None) else _original_write(*a, **kw)
 
-@st.cache_resource
 def get_connection():
     return psycopg2.connect(st.secrets["supabase"]["url"])
 
 def get_cursor():
     try:
-        st.session_state.conn.isolation_level
+        # Test réel de la connexion avec un ping
+        st.session_state.conn.cursor().execute("SELECT 1")
     except Exception:
-        st.session_state.conn = get_connection()
+        # Connexion morte : on en crée une nouvelle
+        try:
+            st.session_state.conn.close()
+        except Exception:
+            pass
+        st.session_state.conn = psycopg2.connect(st.secrets["supabase"]["url"])
     return st.session_state.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
+    
 def init_db():
     cur = get_cursor()
     cur.execute("""
