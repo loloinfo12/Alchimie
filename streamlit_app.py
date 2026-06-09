@@ -336,6 +336,94 @@ def setup():
 
 setup()
 
+
+def get_recettes_joueur_avec_composants(joueur_id):
+    """Charge toutes les recettes d'un joueur avec composants et quantités en 2 requêtes."""
+    cur = get_cursor()
+    # Requête 1 : recettes + composants en une seule jointure
+    cur.execute("""
+        SELECT
+            r.id AS recette_id, r.nom, r.but, r.ingredients, r.utilisation, r.enchantement,
+            c.id AS composant_id, c.nom AS composant_nom, c.type AS composant_type,
+            c.jet_connaissance, c.information
+        FROM recettes r
+        JOIN joueur_recettes jr ON r.id = jr.recette_id
+        LEFT JOIN recette_composant rc ON r.id = rc.recette_id
+        LEFT JOIN composants c ON rc.composant_id = c.id
+        WHERE jr.joueur_id = %s
+        ORDER BY r.nom
+    """, (joueur_id,))
+    rows = cur.fetchall()
+
+    # Requête 2 : toutes les quantités du joueur en une seule fois
+    cur.execute("""
+        SELECT composant_id, recette_id, quantite
+        FROM joueur_composants
+        WHERE joueur_id = %s
+    """, (joueur_id,))
+    quantites = {(q["composant_id"], q["recette_id"]): q["quantite"] for q in cur.fetchall()}
+    cur.close()
+
+    result = []
+    for r in rows:
+        composant = None
+        if r["composant_id"]:
+            composant = {
+                "id": r["composant_id"],
+                "nom": r["composant_nom"],
+                "type": r["composant_type"],
+                "jet": r["jet_connaissance"],
+                "info": r["information"],
+                "quantite": quantites.get((r["composant_id"], r["recette_id"]), 0),
+            }
+        result.append({
+            "id": r["recette_id"],
+            "nom": r["nom"],
+            "but": r["but"],
+            "ingredients": r["ingredients"],
+            "utilisation": r["utilisation"],
+            "enchantement": r["enchantement"],
+            "composant": composant,
+        })
+    return result
+
+
+def get_recettes_joueur_admin(joueur_id):
+    """Charge toutes les recettes d'un joueur avec composants pour la vue admin (1 requête)."""
+    cur = get_cursor()
+    cur.execute("""
+        SELECT
+            r.id AS recette_id, r.nom, r.but, r.ingredients, r.utilisation, r.enchantement,
+            c.id AS composant_id, c.nom AS composant_nom, c.type AS composant_type
+        FROM recettes r
+        JOIN joueur_recettes jr ON r.id = jr.recette_id
+        LEFT JOIN recette_composant rc ON r.id = rc.recette_id
+        LEFT JOIN composants c ON rc.composant_id = c.id
+        WHERE jr.joueur_id = %s
+        ORDER BY r.nom
+    """, (joueur_id,))
+    rows = cur.fetchall()
+    cur.close()
+    result = []
+    for r in rows:
+        composant = None
+        if r["composant_id"]:
+            composant = {
+                "id": r["composant_id"],
+                "nom": r["composant_nom"],
+                "type": r["composant_type"],
+            }
+        result.append({
+            "id": r["recette_id"],
+            "nom": r["nom"],
+            "but": r["but"],
+            "ingredients": r["ingredients"],
+            "utilisation": r["utilisation"],
+            "enchantement": r["enchantement"],
+            "composant": composant,
+        })
+    return result
+
 # -----------------------------
 # Page de connexion
 # -----------------------------
@@ -493,35 +581,36 @@ def page_admin():
         joueurs = get_joueurs()
         if joueurs:
             joueur_vue = st.selectbox("Voir les recettes de", joueurs, format_func=lambda x: x[1], key="vue_joueur")
-            recettes_joueur = get_recettes_joueur(joueur_vue[0])
+            # Une seule requête pour tout charger
+            recettes_joueur = get_recettes_joueur_admin(joueur_vue[0])
             if recettes_joueur:
                 st.markdown(f"**{len(recettes_joueur)} recette(s) attribuée(s) à {joueur_vue[1]} :**")
                 for r in recettes_joueur:
-                    composant = get_composant_principal(r[0])
-                    label = f"📜 {r[1]}"
+                    composant = r["composant"]
+                    label = f"📜 {r['nom']}"
                     if composant:
-                        label += f"  —  🧪 {composant[1]}"
+                        label += f"  —  🧪 {composant['nom']}"
                     with st.expander(label):
-                        if r[2]:
-                            st.markdown(f"**🎯 But :** {r[2]}")
-                        if r[3]:
-                            st.markdown(f"**🌿 Ingrédients :** {r[3]}")
-                        if r[4]:
-                            st.markdown(f"**⚗️ Utilisation :** {r[4]}")
-                        if r[5]:
-                            st.markdown(f"**✨ Enchantement :** {r[5]}")
+                        if r["but"]:
+                            st.markdown(f"**🎯 But :** {r['but']}")
+                        if r["ingredients"]:
+                            st.markdown(f"**🌿 Ingrédients :** {r['ingredients']}")
+                        if r["utilisation"]:
+                            st.markdown(f"**⚗️ Utilisation :** {r['utilisation']}")
+                        if r["enchantement"]:
+                            st.markdown(f"**✨ Enchantement :** {r['enchantement']}")
                         if composant:
-                            st.caption(f"🧪 Composant : {composant[1]} ({composant[2]})")
+                            st.caption(f"🧪 Composant : {composant['nom']} ({composant['type']})")
                         # Bouton de révocation
-                        if st.button("🗑️ Révoquer cette recette", key=f"revoke_{joueur_vue[0]}_{r[0]}"):
+                        if st.button("🗑️ Révoquer cette recette", key=f"revoke_{joueur_vue[0]}_{r['id']}"):
                             cur = get_cursor()
                             cur.execute(
                                 "DELETE FROM joueur_recettes WHERE joueur_id=%s AND recette_id=%s",
-                                (joueur_vue[0], r[0])
+                                (joueur_vue[0], r["id"])
                             )
                             st.session_state.conn.commit()
                             cur.close()
-                            st.success(f"Recette '{r[1]}' révoquée pour {joueur_vue[1]}.")
+                            st.success(f"Recette '{r['nom']}' révoquée pour {joueur_vue[1]}.")
                             st.rerun()
             else:
                 st.info(f"Aucune recette attribuée à {joueur_vue[1]}.")
@@ -740,7 +829,8 @@ def page_joueur():
         st.rerun()
 
     st.title("🧪 Mes Recettes Alchimiques")
-    recettes = get_recettes_joueur(st.session_state.joueur_id)
+    # Une seule requête pour tout charger
+    recettes = get_recettes_joueur_avec_composants(st.session_state.joueur_id)
 
     if not recettes:
         st.info("Aucune recette attribuée pour le moment.")
@@ -749,41 +839,37 @@ def page_joueur():
     st.markdown(f"**{len(recettes)} recette(s) disponible(s)**")
 
     for r in recettes:
-        recette_id = r[0]
-        composant = get_composant_principal(recette_id)
-        quantite_actuelle = 0
-        if composant:
-            quantite_actuelle = get_quantite_composant(
-                st.session_state.joueur_id, composant[0], recette_id
-            )
+        recette_id = r["id"]
+        composant = r["composant"]
+        quantite_actuelle = composant["quantite"] if composant else 0
 
-        label = f"📜 {r[1]}"
+        label = f"📜 {r['nom']}"
         if composant:
-            label += f"  —  🧪 {composant[1]} : {quantite_actuelle}"
+            label += f"  —  🧪 {composant['nom']} : {quantite_actuelle}"
 
         with st.expander(label):
-            if r[2]:
-                st.markdown(f"**🎯 But :** {r[2]}")
-            if r[3]:
-                st.markdown(f"**🌿 Ingrédients :** {r[3]}")
-            if r[4]:
-                st.markdown(f"**⚗️ Utilisation :** {r[4]}")
-            if r[5]:
-                st.markdown(f"**✨ Enchantement :** {r[5]}")
+            if r["but"]:
+                st.markdown(f"**🎯 But :** {r['but']}")
+            if r["ingredients"]:
+                st.markdown(f"**🌿 Ingrédients :** {r['ingredients']}")
+            if r["utilisation"]:
+                st.markdown(f"**⚗️ Utilisation :** {r['utilisation']}")
+            if r["enchantement"]:
+                st.markdown(f"**✨ Enchantement :** {r['enchantement']}")
 
             if composant:
                 st.divider()
-                st.markdown(f"**🧪 Composant principal : {composant[1]}**")
-                st.caption(f"Type : {composant[2]}" + (f"  |  Jet : {composant[3]}" if composant[3] else ""))
-                if composant[4]:
-                    st.caption(f"ℹ️ {composant[4]}")
+                st.markdown(f"**🧪 Composant principal : {composant['nom']}**")
+                st.caption(f"Type : {composant['type']}" + (f"  |  Jet : {composant['jet']}" if composant['jet'] else ""))
+                if composant["info"]:
+                    st.caption(f"ℹ️ {composant['info']}")
 
                 col1, col2, col3 = st.columns([1, 2, 1])
                 with col1:
                     if st.button("➖", key=f"minus_{recette_id}"):
                         nouvelle_qte = max(0, quantite_actuelle - 1)
                         set_quantite_composant(
-                            st.session_state.joueur_id, composant[0], recette_id, nouvelle_qte
+                            st.session_state.joueur_id, composant["id"], recette_id, nouvelle_qte
                         )
                         st.rerun()
                 with col2:
@@ -794,7 +880,7 @@ def page_joueur():
                 with col3:
                     if st.button("➕", key=f"plus_{recette_id}"):
                         set_quantite_composant(
-                            st.session_state.joueur_id, composant[0], recette_id, quantite_actuelle + 1
+                            st.session_state.joueur_id, composant["id"], recette_id, quantite_actuelle + 1
                         )
                         st.rerun()
             else:
