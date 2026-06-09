@@ -19,7 +19,7 @@ def get_connection():
 
 def get_cursor():
     try:
-        # Test réel de la connexion avec un ping
+        # Test réel de la connexion
         st.session_state.conn.cursor().execute("SELECT 1")
     except Exception:
         # Connexion morte : on en crée une nouvelle
@@ -27,9 +27,9 @@ def get_cursor():
             st.session_state.conn.close()
         except Exception:
             pass
-        st.session_state.conn = psycopg2.connect(st.secrets["supabase"]["url"])
+        st.session_state.conn = get_connection()
     return st.session_state.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    
+
 def init_db():
     cur = get_cursor()
     cur.execute("""
