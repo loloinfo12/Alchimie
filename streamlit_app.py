@@ -321,10 +321,32 @@ def setup():
     if "conn" not in st.session_state:
         st.session_state.conn = get_connection()
     if "initialized" not in st.session_state:
-        init_db()
-        import_csv(silent=True)
-        import_composants(silent=True)
-        st.session_state["initialized"] = True
+        # Retry jusqu'à 5 fois pour laisser Supabase se réveiller
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                init_db()
+                import_csv(silent=True)
+                import_composants(silent=True)
+                st.session_state["initialized"] = True
+                break
+            except Exception as e:
+                try:
+                    st.session_state.conn.rollback()
+                except Exception:
+                    pass
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(2)
+                    # Recréer la connexion au cas où
+                    try:
+                        st.session_state.conn.close()
+                    except Exception:
+                        pass
+                    st.session_state.conn = get_connection()
+                else:
+                    st.error(f"Impossible de se connecter à la base de données après {max_retries} tentatives. Rechargez la page.")
+                    st.stop()
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
     if "role" not in st.session_state:
