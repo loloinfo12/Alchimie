@@ -18,17 +18,28 @@ def get_connection():
     return psycopg2.connect(st.secrets["supabase"]["url"])
 
 def get_cursor():
-    try:
-        # Test réel de la connexion
-        st.session_state.conn.cursor().execute("SELECT 1")
-    except Exception:
-        # Connexion morte : on en crée une nouvelle
+    import time
+    max_retries = 5
+    for attempt in range(max_retries):
         try:
-            st.session_state.conn.close()
+            # Test réel de la connexion
+            st.session_state.conn.cursor().execute("SELECT 1")
+            return st.session_state.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         except Exception:
-            pass
-        st.session_state.conn = get_connection()
-    return st.session_state.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            try:
+                st.session_state.conn.rollback()
+            except Exception:
+                pass
+            try:
+                st.session_state.conn.close()
+            except Exception:
+                pass
+            if attempt < max_retries - 1:
+                time.sleep(2)
+                st.session_state.conn = get_connection()
+            else:
+                st.error("Connexion à la base de données impossible. Rechargez la page.")
+                st.stop()
 
 def init_db():
     try:
