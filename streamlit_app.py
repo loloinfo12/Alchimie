@@ -46,6 +46,10 @@ def init_db():
             enchantement TEXT
         )
     """)
+    # Ajout de la contrainte UNIQUE sur nom si elle n'existe pas
+    cur.execute("""
+        ALTER TABLE recettes ADD CONSTRAINT IF NOT EXISTS recettes_nom_unique UNIQUE (nom)
+    """)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS joueur_recettes (
             joueur_id INTEGER REFERENCES joueurs(id),
@@ -102,23 +106,31 @@ def load_csv(csv_file):
     return df
 
 def import_csv(silent=True):
-    cur = get_cursor()
-    cur.execute("SELECT COUNT(*) FROM recettes")
-    count = cur.fetchone()["count"]
-    cur.close()
-    if count > 0:
-        return
+    """
+    Import ou met à jour les recettes depuis le CSV.
+    Utilise un upsert basé sur le nom pour préserver les IDs existants
+    et donc toutes les associations composants/joueurs.
+    """
     if not os.path.exists(CSV_FILE):
         st.error(f"Fichier {CSV_FILE} introuvable.")
         return
     df = load_csv(CSV_FILE)
     cur = get_cursor()
     for _, row in df.iterrows():
+        nom = normalize_text(row.get("Nom recette", ""))
+        if not nom:
+            continue
         cur.execute("""
             INSERT INTO recettes (nom, contenu, but, ingredients, utilisation, enchantement)
             VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (nom) DO UPDATE SET
+                contenu      = EXCLUDED.contenu,
+                but          = EXCLUDED.but,
+                ingredients  = EXCLUDED.ingredients,
+                utilisation  = EXCLUDED.utilisation,
+                enchantement = EXCLUDED.enchantement
         """, (
-            normalize_text(row.get("Nom recette", "")),
+            nom,
             normalize_text(row.get("Contenu", "")),
             normalize_text(row.get("But", "")),
             normalize_text(row.get("Ingrédients", "")),
@@ -128,7 +140,7 @@ def import_csv(silent=True):
     st.session_state.conn.commit()
     cur.close()
     if not silent:
-        st.success(f"✅ CSV recettes importé avec succès ({len(df)} recettes) !")
+        st.success(f"✅ Recettes mises à jour ({len(df)} recettes traitées) !")
 
 def import_composants(silent=True):
     cur = get_cursor()
@@ -613,20 +625,24 @@ def page_admin():
 
         col1, col2 = st.columns(2)
         with col1:
+            st.subheader("♻️ Recettes")
+            st.caption(
+                "Met à jour les recettes existantes et ajoute les nouvelles. "
+                "Les associations composants et attributions joueurs sont **préservées**."
+            )
             with st.form("form_reimport_recettes"):
-                submitted_r = st.form_submit_button("♻️ Réimporter les recettes")
+                submitted_r = st.form_submit_button("♻️ Mettre à jour les recettes")
                 if submitted_r:
-                    cur = get_cursor()
-                    cur.execute("DELETE FROM joueur_composants")
-                    cur.execute("DELETE FROM recette_composant")
-                    cur.execute("DELETE FROM joueur_recettes")
-                    cur.execute("DELETE FROM recettes")
-                    st.session_state.conn.commit()
-                    cur.close()
                     load_csv.clear()
                     import_csv(silent=False)
                     st.rerun()
+
         with col2:
+            st.subheader("♻️ Composants")
+            st.caption(
+                "Réimporte entièrement les composants depuis le CSV. "
+                "⚠️ Les associations composants-recettes et quantités joueurs seront **effacées**."
+            )
             with st.form("form_reimport_composants"):
                 submitted_c = st.form_submit_button("♻️ Réimporter les composants")
                 if submitted_c:
