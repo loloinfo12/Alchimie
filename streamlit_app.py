@@ -124,10 +124,17 @@ def load_csv(csv_file):
     return df
 
 def import_csv(silent=True):
+    # Vérification en base : on n'importe que si la table est vide
     try:
         st.session_state.conn.rollback()
     except Exception:
         pass
+    cur = get_cursor()
+    cur.execute("SELECT COUNT(*) FROM recettes")
+    count = cur.fetchone()["count"]
+    cur.close()
+    if count > 0 and silent:
+        return  # Déjà importé, on ne réimporte pas au chargement
     if not os.path.exists(CSV_FILE):
         st.error(f"Fichier {CSV_FILE} introuvable.")
         return
