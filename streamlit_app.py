@@ -487,6 +487,45 @@ def page_admin():
         else:
             st.warning("Il faut au moins un joueur et une recette.")
 
+        # ── Vue des recettes par joueur ──
+        st.divider()
+        st.subheader("📋 Recettes attribuées par joueur")
+        joueurs = get_joueurs()
+        if joueurs:
+            joueur_vue = st.selectbox("Voir les recettes de", joueurs, format_func=lambda x: x[1], key="vue_joueur")
+            recettes_joueur = get_recettes_joueur(joueur_vue[0])
+            if recettes_joueur:
+                st.markdown(f"**{len(recettes_joueur)} recette(s) attribuée(s) à {joueur_vue[1]} :**")
+                for r in recettes_joueur:
+                    composant = get_composant_principal(r[0])
+                    label = f"📜 {r[1]}"
+                    if composant:
+                        label += f"  —  🧪 {composant[1]}"
+                    with st.expander(label):
+                        if r[2]:
+                            st.markdown(f"**🎯 But :** {r[2]}")
+                        if r[3]:
+                            st.markdown(f"**🌿 Ingrédients :** {r[3]}")
+                        if r[4]:
+                            st.markdown(f"**⚗️ Utilisation :** {r[4]}")
+                        if r[5]:
+                            st.markdown(f"**✨ Enchantement :** {r[5]}")
+                        if composant:
+                            st.caption(f"🧪 Composant : {composant[1]} ({composant[2]})")
+                        # Bouton de révocation
+                        if st.button("🗑️ Révoquer cette recette", key=f"revoke_{joueur_vue[0]}_{r[0]}"):
+                            cur = get_cursor()
+                            cur.execute(
+                                "DELETE FROM joueur_recettes WHERE joueur_id=%s AND recette_id=%s",
+                                (joueur_vue[0], r[0])
+                            )
+                            st.session_state.conn.commit()
+                            cur.close()
+                            st.success(f"Recette '{r[1]}' révoquée pour {joueur_vue[1]}.")
+                            st.rerun()
+            else:
+                st.info(f"Aucune recette attribuée à {joueur_vue[1]}.")
+
     # ── Gérer Composants ───────────────────────────────────────
     elif menu == "Gérer Composants":
         st.title("🧪 Gestion des composants principaux")
